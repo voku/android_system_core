@@ -116,6 +116,7 @@ static struct perms_ devperms[] = {
     { "/dev/ttyHS0",        0600,   AID_BLUETOOTH,  AID_BLUETOOTH,  0 },
     { "/dev/uinput",        0660,   AID_SYSTEM,     AID_BLUETOOTH,  0 },
     { "/dev/alarm",         0664,   AID_SYSTEM,     AID_RADIO,      0 },
+    { "/dev/rtc1",          0660,   AID_SYSTEM,     AID_RADIO,      0 },
     { "/dev/tty0",          0660,   AID_ROOT,       AID_SYSTEM,     0 },
     { "/dev/graphics/",     0660,   AID_ROOT,       AID_GRAPHICS,   1 },
     { "/dev/msm_hw3dm",     0660,   AID_SYSTEM,     AID_GRAPHICS,   0 },
