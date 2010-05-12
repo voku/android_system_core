@@ -55,6 +55,7 @@ int watchprops_main(int argc, char *argv[])
         do {
             __futex_wait(&pa->serial, serial, 0);
         } while(pa->serial == serial);
+        serial = pa->serial;
 
         while(count < pa->count){
             watchlist[count].pi = __system_property_find_nth(count);
