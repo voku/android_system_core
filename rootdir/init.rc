@@ -372,7 +372,7 @@ service media /system/bin/mediaserver
 
 service bootanim /system/bin/bootanimation
     user graphics
-    group graphics
+    group graphics log
     disabled
     oneshot
 
