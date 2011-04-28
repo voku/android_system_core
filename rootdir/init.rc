@@ -7,6 +7,9 @@ sysclktz 0
 
 loglevel 3
 
+# Location of BT firmware files
+    export BT_FW_PATH /system/lib/firmware
+
 # setup the global environment
     export PATH /sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin
     export LD_LIBRARY_PATH /vendor/lib:/system/lib
@@ -204,6 +207,21 @@ on post-fs
     chown root system /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq
     chmod 0664 /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq
 
+    setprop alsa.mixer.playback.master Master
+    setprop alsa.mixer.capture.master Capture
+    setprop alsa.mixer.playback.earpiece Master
+    setprop alsa.mixer.capture.earpiece Capture
+    setprop alsa.mixer.playback.headset Master
+    setprop alsa.mixer.playback.speaker Master
+    chmod 0777 /dev/pcmC0D0c
+    chmod 0777 /dev/pcmC0D0p
+    chmod 0777 /dev/controlC0
+    chmod 0777 /dev/timer
+    chown root audio /dev/controlC
+    chown root audio /dev/pcmC0D0c
+    chown root audio /dev/pcmC0D0p
+    chown root audio /dev/timer
+
 on boot
 # basic network init
     ifup lo
@@ -336,6 +354,11 @@ on property:persist.service.adb.enable=1
 
 on property:persist.service.adb.enable=0
     stop adbd
+
+service uim /system/bin/uim-rfkill
+    user root
+    group media bluetooth
+    oneshot
 
 service servicemanager /system/bin/servicemanager
     user system
