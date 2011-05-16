@@ -28,6 +28,8 @@ loglevel 3
 # Backward compatibility
     symlink /system/etc /etc
     symlink /sys/kernel/debug /d
+    symlink /system/lib/modules /system/lib/modules/2.6.32.9-gfunkmonk
+    symlink /system/etc/firmware /system/lib/firmware
 
 # Right now vendor lives on the same filesystem as system,
 # but someday that may change.
@@ -355,7 +357,7 @@ on property:persist.service.adb.enable=1
 on property:persist.service.adb.enable=0
     stop adbd
 
-service uim /system/bin/uim-rfkill
+service uim /system/bin/uim-rfkill /dev/ttyO1 3000000 1 22
     user root
     group media bluetooth
     oneshot
