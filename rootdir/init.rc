@@ -29,7 +29,7 @@ loglevel 3
     symlink /system/etc /etc
     symlink /sys/kernel/debug /d
     symlink /system/lib/modules /system/lib/modules/2.6.32.9-gfunkmonk
-    symlink /system/etc/firmware /system/lib/firmware
+    symlink /system/lib/firmware /system/etc/firmware
 
 # Right now vendor lives on the same filesystem as system,
 # but someday that may change.
