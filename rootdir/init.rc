@@ -28,6 +28,7 @@ loglevel 3
 # Backward compatibility
     symlink /system/etc /etc
     symlink /sys/kernel/debug /d
+    mkdir /system/lib/modules/2.6.32.9-gfunkmonk 0755 system system
     symlink /system/lib/modules /system/lib/modules/2.6.32.9-gfunkmonk
     symlink /system/lib/firmware /system/etc/firmware
 
