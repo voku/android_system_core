@@ -358,7 +358,7 @@ on property:persist.service.adb.enable=1
 on property:persist.service.adb.enable=0
     stop adbd
 
-service uim /system/bin/uim-rfkill /dev/ttyO1 3000000 1 22
+service uim /system/bin/uim-sysfs
     user root
     group media bluetooth
     oneshot
