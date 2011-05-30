@@ -28,9 +28,7 @@ loglevel 3
 # Backward compatibility
     symlink /system/etc /etc
     symlink /sys/kernel/debug /d
-    mkdir /system/lib/modules/2.6.32.9-gfunkmonk 0755 system system
     symlink /system/lib/modules /system/lib/modules/2.6.32.9-gfunkmonk
-    symlink /system/lib/firmware /system/etc/firmware
 
 # Right now vendor lives on the same filesystem as system,
 # but someday that may change.
@@ -363,10 +361,10 @@ service bootsound /system/bin/stagefright -a -o /system/media/audio/notification
     group audio
     oneshot
 
-service uim /system/bin/uim-sysfs
-    user root
-    group media bluetooth
-    oneshot
+#service uim /system/bin/uim-sysfs
+#    user root
+#    group media bluetooth
+#    oneshot
 
 service servicemanager /system/bin/servicemanager
     user system
