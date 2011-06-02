@@ -28,7 +28,6 @@ loglevel 3
 # Backward compatibility
     symlink /system/etc /etc
     symlink /sys/kernel/debug /d
-    symlink /system/lib/modules /system/lib/modules/2.6.32.9-gfunkmonk
 
 # Right now vendor lives on the same filesystem as system,
 # but someday that may change.
