@@ -10,7 +10,7 @@
 #ifndef _CUTILS_ASHMEM_H
 #define _CUTILS_ASHMEM_H
 
-#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {

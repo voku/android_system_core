@@ -10,6 +10,7 @@ TOOLS := \
 	lsmod \
 	ifconfig \
 	setconsole \
+	mkdir \
 	rmdir \
 	reboot \
 	getevent \
@@ -43,11 +44,10 @@ TOOLS := \
 	uptime \
 	vmstat \
 	nandread \
-	ionice 
+	ionice
 
 ifndef TINY_TOOLBOX
     TOOLS += \
-        mkdir \
         ln \
         ls \
         mount \
@@ -56,8 +56,7 @@ ifndef TINY_TOOLBOX
         df \
         chmod \
         chown \
-        mv \
-        lsof	
+        mv 
 endif
 
 LOCAL_SRC_FILES:= \
@@ -67,10 +66,6 @@ LOCAL_SRC_FILES:= \
 LOCAL_SHARED_LIBRARIES := libcutils libc
 
 LOCAL_MODULE:= toolbox
-
-ifneq ($(TARGET_RECOVERY_PRE_COMMAND),)
-	LOCAL_CFLAGS += -DRECOVERY_PRE_COMMAND='$(TARGET_RECOVERY_PRE_COMMAND)'
-endif
 
 # Including this will define $(intermediates).
 #

@@ -302,8 +302,10 @@ void handle_packet(apacket *p, atransport *t)
 {
     asocket *s;
 
-    D("handle_packet() %d\n", p->msg.command);
-
+    D("handle_packet() %c%c%c%c\n", ((char*) (&(p->msg.command)))[0],
+            ((char*) (&(p->msg.command)))[1],
+            ((char*) (&(p->msg.command)))[2],
+            ((char*) (&(p->msg.command)))[3]);
     print_packet("recv", p);
 
     switch(p->msg.command){
@@ -680,11 +682,9 @@ void start_device_log(void)
     dup2(fd, 1);
     dup2(fd, 2);
     fprintf(stderr,"--- adb starting (pid %d) ---\n", getpid());
-    adb_close(fd);
 
     fd = unix_open("/dev/null", O_RDONLY);
     dup2(fd, 0);
-    adb_close(fd);
 }
 #endif
 
@@ -838,7 +838,7 @@ int adb_main(int is_daemon, int server_port)
 {
 #if !ADB_HOST
     int secure = 0;
-    int port;
+    int port = -1;
     char value[PROPERTY_VALUE_MAX];
 #endif
 
@@ -945,14 +945,19 @@ int adb_main(int is_daemon, int server_port)
     property_get("service.adb.tcp.port", value, "");
     if (!value[0])
         property_get("persist.adb.tcp.port", value, "");
-    if (sscanf(value, "%d", &port) == 1 && port > 0) {
+    sscanf(value, "%d", &port);
+
+    if (port > 0) {
         // listen on TCP port specified by service.adb.tcp.port property
         local_init(port);
-    } else if (access("/dev/android_adb", F_OK) == 0) {
-        // listen on USB
-        usb_init();
-    } else {
-        // listen on default port
+    }
+
+    if (access("/dev/android_adb", F_OK) == 0) {
+	// listen on USB
+	usb_init();
+    } else if(port == -1) {
+        // listen on default port if we have no USB to connect to and we didn't
+	// connect to an explicit port above
         local_init(DEFAULT_ADB_LOCAL_TRANSPORT_PORT);
     }
     init_jdwp();

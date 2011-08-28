@@ -311,26 +311,11 @@
 /*
  * Define if <stdbool.h> exists.
  */
-#define HAVE_STDBOOL_H
+/* #define HAVE_STDBOOL_H */
 
 /*
  * Define if <sched.h> exists.
  */
 /* #define HAVE_SCHED_H */
-
-/*
- * Define if pread() exists
- */
-/* #define HAVE_PREAD 1 */
-
-/*
- * Define if we have st_mtim in struct stat
- */
-/* #define HAVE_STAT_ST_MTIM 1 */
-
-/*
- * Define if printf() supports %zd for size_t arguments
- */
-/* #define HAVE_PRINTF_ZD 1 */
 
 #endif /*_ANDROID_CONFIG_H*/

@@ -27,8 +27,11 @@
 #include <arpa/inet.h>
 
 #include <linux/if.h>
+#include <linux/if_ether.h>
+#include <linux/if_arp.h>
 #include <linux/sockios.h>
 #include <linux/route.h>
+#include <netdb.h>
 #include <linux/wireless.h>
 
 #ifdef ANDROID
@@ -43,9 +46,10 @@
 #endif
 
 static int ifc_ctl_sock = -1;
+static int ifc_ctl_sock6 = -1;
 void printerr(char *fmt, ...);
 
-static const char *ipaddr_to_string(uint32_t addr)
+static const char *ipaddr_to_string(in_addr_t addr)
 {
     struct in_addr in_addr;
 
@@ -64,11 +68,30 @@ int ifc_init(void)
     return ifc_ctl_sock < 0 ? -1 : 0;
 }
 
+int ifc_init6(void)
+{
+    if (ifc_ctl_sock6 == -1) {
+        ifc_ctl_sock6 = socket(AF_INET6, SOCK_DGRAM, 0);
+        if (ifc_ctl_sock6 < 0) {
+            printerr("socket() failed: %s\n", strerror(errno));
+        }
+    }
+    return ifc_ctl_sock6 < 0 ? -1 : 0;
+}
+
 void ifc_close(void)
 {
     if (ifc_ctl_sock != -1) {
         (void)close(ifc_ctl_sock);
         ifc_ctl_sock = -1;
+    }
+}
+
+void ifc_close6(void)
+{
+    if (ifc_ctl_sock6 != -1) {
+        (void)close(ifc_ctl_sock6);
+        ifc_ctl_sock6 = -1;
     }
 }
 
@@ -88,7 +111,7 @@ int ifc_get_hwaddr(const char *name, void *ptr)
     r = ioctl(ifc_ctl_sock, SIOCGIFHWADDR, &ifr);
     if(r < 0) return -1;
 
-    memcpy(ptr, &ifr.ifr_hwaddr.sa_data, 6);
+    memcpy(ptr, &ifr.ifr_hwaddr.sa_data, ETH_ALEN);
     return 0;    
 }
 
@@ -143,6 +166,17 @@ int ifc_set_addr(const char *name, in_addr_t addr)
     return ioctl(ifc_ctl_sock, SIOCSIFADDR, &ifr);
 }
 
+int ifc_set_hwaddr(const char *name, const void *ptr)
+{
+    int r;
+    struct ifreq ifr;
+    ifc_init_ifr(name, &ifr);
+
+    ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
+    memcpy(&ifr.ifr_hwaddr.sa_data, ptr, ETH_ALEN);
+    return ioctl(ifc_ctl_sock, SIOCSIFHWADDR, &ifr);
+}
+
 int ifc_set_mask(const char *name, in_addr_t mask)
 {
     struct ifreq ifr;
@@ -185,43 +219,78 @@ int ifc_get_info(const char *name, in_addr_t *addr, in_addr_t *mask, unsigned *f
     return 0;
 }
 
-
-int ifc_create_default_route(const char *name, in_addr_t addr)
+in_addr_t get_ipv4_netmask(int prefix_length)
 {
-    struct rtentry rt;
+    in_addr_t mask = 0;
 
-    memset(&rt, 0, sizeof(rt));
-    
-    rt.rt_dst.sa_family = AF_INET;
-    rt.rt_flags = RTF_UP | RTF_GATEWAY;
-    rt.rt_dev = (void*) name;
-    init_sockaddr_in(&rt.rt_genmask, 0);
-    init_sockaddr_in(&rt.rt_gateway, addr);
-    
-    return ioctl(ifc_ctl_sock, SIOCADDRT, &rt);
+    mask = ~mask << (32 - prefix_length);
+    mask = htonl(mask);
+
+    return mask;
 }
 
-int ifc_add_host_route(const char *name, in_addr_t addr)
+int ifc_add_ipv4_route(const char *ifname, struct in_addr dst, int prefix_length,
+      struct in_addr gw)
 {
     struct rtentry rt;
     int result;
+    in_addr_t netmask;
 
     memset(&rt, 0, sizeof(rt));
-    
+
     rt.rt_dst.sa_family = AF_INET;
-    rt.rt_flags = RTF_UP | RTF_HOST;
-    rt.rt_dev = (void*) name;
-    init_sockaddr_in(&rt.rt_dst, addr);
-    init_sockaddr_in(&rt.rt_genmask, 0);
-    init_sockaddr_in(&rt.rt_gateway, 0);
-    
+    rt.rt_dev = (void*) ifname;
+
+    netmask = get_ipv4_netmask(prefix_length);
+    init_sockaddr_in(&rt.rt_genmask, netmask);
+    init_sockaddr_in(&rt.rt_dst, dst.s_addr);
+    rt.rt_flags = RTF_UP;
+
+    if (prefix_length == 32) {
+        rt.rt_flags |= RTF_HOST;
+    }
+
+    if (gw.s_addr != 0) {
+        rt.rt_flags |= RTF_GATEWAY;
+        init_sockaddr_in(&rt.rt_gateway, gw.s_addr);
+    }
+
     ifc_init();
+
+    if (ifc_ctl_sock < 0) {
+        return -errno;
+    }
+
     result = ioctl(ifc_ctl_sock, SIOCADDRT, &rt);
-    if (result < 0 && errno == EEXIST) {
-        result = 0;
+    if (result < 0) {
+        if (errno == EEXIST) {
+            result = 0;
+        } else {
+            result = -errno;
+        }
     }
     ifc_close();
     return result;
+}
+
+int ifc_create_default_route(const char *name, in_addr_t gw)
+{
+    struct in_addr in_dst, in_gw;
+
+    in_dst.s_addr = 0;
+    in_gw.s_addr = gw;
+
+    return ifc_add_ipv4_route(name, in_dst, 0, in_gw);
+}
+
+int ifc_add_host_route(const char *name, in_addr_t dst)
+{
+    struct in_addr in_dst, in_gw;
+
+    in_dst.s_addr = dst;
+    in_gw.s_addr = 0;
+
+    return ifc_add_ipv4_route(name, in_dst, 32, in_gw);
 }
 
 int ifc_enable(const char *ifname)
@@ -429,10 +498,66 @@ ifc_configure(const char *ifname,
 
     ifc_close();
 
-    snprintf(dns_prop_name, sizeof(dns_prop_name), "dhcp.%s.dns1", ifname);
+    snprintf(dns_prop_name, sizeof(dns_prop_name), "net.%s.dns1", ifname);
     property_set(dns_prop_name, dns1 ? ipaddr_to_string(dns1) : "");
-    snprintf(dns_prop_name, sizeof(dns_prop_name), "dhcp.%s.dns2", ifname);
+    snprintf(dns_prop_name, sizeof(dns_prop_name), "net.%s.dns2", ifname);
     property_set(dns_prop_name, dns2 ? ipaddr_to_string(dns2) : "");
 
     return 0;
+}
+
+int ifc_add_route(const char *ifname, const char *dst, int prefix_length,
+      const char *gw)
+{
+    int ret = 0;
+    struct sockaddr_in ipv4_dst, ipv4_gw;
+    struct addrinfo hints, *addr_ai, *gw_ai;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
+    hints.ai_flags = AI_NUMERICHOST;
+
+    ret = getaddrinfo(dst, NULL, &hints, &addr_ai);
+
+    if (ret != 0) {
+        printerr("getaddrinfo failed: invalid address %s\n", dst);
+        return -EINVAL;
+    }
+
+    if (gw == NULL) {
+        if (addr_ai->ai_family == AF_INET6) {
+            gw = "::";
+        } else if (addr_ai->ai_family == AF_INET) {
+            gw = "0.0.0.0";
+        }
+    }
+
+    ret = getaddrinfo(gw, NULL, &hints, &gw_ai);
+    if (ret != 0) {
+        printerr("getaddrinfo failed: invalid gateway %s\n", gw);
+        freeaddrinfo(addr_ai);
+        return -EINVAL;
+    }
+
+    if (addr_ai->ai_family != gw_ai->ai_family) {
+        printerr("ifc_add_route: different address families: %s and %s\n", dst, gw);
+        freeaddrinfo(addr_ai);
+        freeaddrinfo(gw_ai);
+        return -EINVAL;
+    }
+
+    if (addr_ai->ai_family == AF_INET) {
+        memcpy(&ipv4_dst, addr_ai->ai_addr, sizeof(struct sockaddr_in));
+        memcpy(&ipv4_gw, gw_ai->ai_addr, sizeof(struct sockaddr_in));
+        ret = ifc_add_ipv4_route(ifname, ipv4_dst.sin_addr, prefix_length,
+              ipv4_gw.sin_addr);
+    } else {
+        printerr("ifc_add_route: getaddrinfo returned un supported address family %d\n",
+                  addr_ai->ai_family);
+        ret = -EAFNOSUPPORT;
+    }
+
+    freeaddrinfo(addr_ai);
+    freeaddrinfo(gw_ai);
+    return ret;
 }

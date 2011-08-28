@@ -28,16 +28,9 @@
 #define HAVE_PTHREADS
 
 /*
- * Do we have pthread_setname_np()?
- *
- * (HAVE_PTHREAD_SETNAME_NP is used by WebKit to enable a function with
- * the same name but different parameters, so we can't use that here.)
- */
-#define HAVE_ANDROID_PTHREAD_SETNAME_NP
-
-/*
  * Do we have the futex syscall?
  */
+
 #define HAVE_FUTEX
 
 /*
@@ -227,7 +220,7 @@
 /*
  * Define if we have Linux's dbus 
  */
-#define HAVE_DBUS 1
+/* #define HAVE_DBUS 1 */
 
 /*
  * Define if tm struct has tm_gmtoff field
@@ -329,20 +322,5 @@
  * Define if <sched.h> exists.
  */
 #define HAVE_SCHED_H 1
-
-/*
- * Define if pread() exists
- */
-#define HAVE_PREAD 1
-
-/*
- * Define if we have st_mtim in struct stat
- */
-#define HAVE_STAT_ST_MTIM 1
-
-/*
- * Define if printf() supports %zd for size_t arguments
- */
-#define HAVE_PRINTF_ZD 1
 
 #endif /* _ANDROID_CONFIG_H */

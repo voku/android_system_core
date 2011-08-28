@@ -17,12 +17,15 @@
 #ifndef _INIT_DEVICES_H
 #define _INIT_DEVICES_H
 
-#include <sys/stat.h>
+#define DEVWAIT_TIMEOUT 10000 /* 10 seconds */
+#define DEVWAIT_POLL_TIME 50
 
-extern void handle_device_fd();
-extern void device_init(void);
-extern int add_dev_perms(const char *name, const char *attr,
-                         mode_t perm, unsigned int uid,
-                         unsigned int gid, unsigned short prefix);
-int get_device_fd();
+int open_uevent_socket(void);
+extern void handle_device_fd(int fd);
+extern int device_init(void);
+extern void qemu_init(void);
+extern void qemu_cmdline(const char* name, const char *value);
+extern int add_devperms_partners(const char *name, mode_t perm, unsigned int uid,
+                                 unsigned int gid, unsigned short prefix);
+
 #endif	/* _INIT_DEVICES_H */

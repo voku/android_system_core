@@ -17,13 +17,12 @@
 #ifndef _INIT_PROPERTY_H
 #define _INIT_PROPERTY_H
 
-extern void handle_property_set_fd(void);
+extern void handle_property_fd(int fd);
+extern void handle_property_set_fd(int fd);
 extern void property_init(void);
-extern void start_property_service(void);
+extern int start_property_service(char *data);
 void get_property_workspace(int *fd, int *sz);
 extern const char* property_get(const char *name);
 extern int property_set(const char *name, const char *value);
-extern int properties_inited();
-int get_property_set_fd(void);
 
 #endif	/* _INIT_PROPERTY_H */

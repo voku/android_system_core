@@ -178,11 +178,6 @@ void reboot_service(int fd, void *arg)
     char buf[100];
     int pid, ret;
 
-#ifdef RECOVERY_PRE_COMMAND
-	if (!strncmp((char *)arg,"recovery",8))
-		system( RECOVERY_PRE_COMMAND );
-#endif
-
     sync();
 
     /* Attempt to unmount the SD card first.
@@ -197,8 +192,9 @@ void reboot_service(int fd, void *arg)
         /* wait until vdc succeeds or fails */
         waitpid(pid, &ret, 0);
     }
+
     ret = __reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
-                   LINUX_REBOOT_CMD_RESTART2, (char *)arg);
+                    LINUX_REBOOT_CMD_RESTART2, (char *)arg);
     if (ret < 0) {
         snprintf(buf, sizeof(buf), "reboot failed: %s\n", strerror(errno));
         writex(fd, buf, strlen(buf));
@@ -313,7 +309,6 @@ static int create_subprocess(const char *cmd, const char *arg0, const char *arg1
         dup2(pts, 1);
         dup2(pts, 2);
 
-        adb_close(pts);
         adb_close(ptm);
 
         execl(cmd, cmd, arg0, arg1, NULL);

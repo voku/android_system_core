@@ -27,6 +27,7 @@
 
 #include <cutils/misc.h>
 #include <cutils/sockets.h>
+#include <cutils/ashmem.h>
 
 #define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
 #include <sys/_system_properties.h>
@@ -42,15 +43,11 @@
 
 #include "property_service.h"
 #include "init.h"
-#include "util.h"
-#include "log.h"
 
 #define PERSISTENT_PROPERTY_DIR  "/data/property"
+#define PROP_MSG_SETPROP_SYNC 2
 
 static int persistent_properties_loaded = 0;
-static int property_area_inited = 0;
-
-static int property_set_fd = -1;
 
 /* White list of permissions for setting property services. */
 struct {
@@ -58,14 +55,14 @@ struct {
     unsigned int uid;
     unsigned int gid;
 } property_perms[] = {
-    { "net.rmnet",        AID_RADIO,    0 },
+    { "net.rmnet0.",      AID_RADIO,    0 },
     { "net.gprs.",        AID_RADIO,    0 },
     { "net.ppp",          AID_RADIO,    0 },
     { "ril.",             AID_RADIO,    0 },
     { "gsm.",             AID_RADIO,    0 },
     { "persist.radio",    AID_RADIO,    0 },
     { "net.dns",          AID_RADIO,    0 },
-    { "net.gannet",       AID_RADIO,    0 },
+	{ "net.gannet",	      AID_RADIO,	0 },  
     { "net.",             AID_SYSTEM,   0 },
     { "dev.",             AID_SYSTEM,   0 },
     { "runtime.",         AID_SYSTEM,   0 },
@@ -73,28 +70,18 @@ struct {
     { "sys.",             AID_SYSTEM,   0 },
     { "service.",         AID_SYSTEM,   0 },
     { "wlan.",            AID_SYSTEM,   0 },
+    { "wimax.",           AID_SYSTEM,   0 },
     { "dhcp.",            AID_SYSTEM,   0 },
     { "dhcp.",            AID_DHCP,     0 },
     { "vpn.",             AID_SYSTEM,   0 },
     { "vpn.",             AID_VPN,      0 },
     { "debug.",           AID_SHELL,    0 },
     { "log.",             AID_SHELL,    0 },
-    { "phone.sms.lock",   AID_SYSTEM,   0 },
-    { "phone.sms.lock",   AID_RADIO,    0 },
     { "service.adb.root", AID_SHELL,    0 },
     { "persist.sys.",     AID_SYSTEM,   0 },
     { "persist.service.", AID_SYSTEM,   0 },
-    { "persist.security.",AID_SYSTEM,   0 },
-    { "wimax.",           AID_SYSTEM,   1000 },
-    { "net.pdp0",         AID_RADIO,    0 },
-    { "net.pdp1",         AID_RADIO,    AID_RADIO },
-    { "net.pdp2",         AID_RADIO,    AID_RADIO },
-    { "net.pdp3",         AID_RADIO,    AID_RADIO },
-    { "net.pdp4",         AID_RADIO,    AID_RADIO },
-    { "net.vsnet0",       AID_RADIO,    AID_RADIO },
-    { "net.vsnet1",       AID_RADIO,    AID_RADIO },
-    { "net.vsnet2",       AID_RADIO,    AID_RADIO },
-    { "net.vsnet3",       AID_RADIO,    AID_RADIO },
+    { "persist.security.", AID_SYSTEM,   0 },
+    { "persist.wimax.",   AID_SYSTEM,   0 },
     { NULL, 0, 0 }
 };
 
@@ -107,11 +94,7 @@ struct {
     unsigned int uid;
     unsigned int gid;
 } control_perms[] = {
-    { "dumpstate",   AID_SHELL, AID_LOG   },
-    { "rawip_vsnet1",AID_RADIO, AID_RADIO },
-    { "rawip_vsnet2",AID_RADIO, AID_RADIO },
-    { "rawip_vsnet3",AID_RADIO, AID_RADIO },
-    { "rawip_vsnet4",AID_RADIO, AID_RADIO },
+    { "dumpstate",AID_SHELL, AID_LOG },
      {NULL, 0, 0 }
 };
 
@@ -126,31 +109,21 @@ static int init_workspace(workspace *w, size_t size)
     void *data;
     int fd;
 
-        /* dev is a tmpfs that we can use to carve a shared workspace
-         * out of, so let's do that...
-         */
-    fd = open("/dev/__properties__", O_RDWR | O_CREAT, 0600);
-    if (fd < 0)
+    fd = ashmem_create_region("system_properties", size);
+    if(fd < 0)
         return -1;
-
-    if (ftruncate(fd, size) < 0)
-        goto out;
 
     data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if(data == MAP_FAILED)
         goto out;
 
-    close(fd);
-
-    fd = open("/dev/__properties__", O_RDONLY);
-    if (fd < 0)
-        return -1;
-
-    unlink("/dev/__properties__");
+    /* allow the wolves we share with to do nothing but read */
+    ashmem_set_prot_region(fd, PROT_READ);
 
     w->data = data;
     w->size = size;
     w->fd = fd;
+
     return 0;
 
 out:
@@ -161,20 +134,9 @@ out:
 /* (8 header words + 247 toc words) = 1020 bytes */
 /* 1024 bytes header and toc + 247 prop_infos @ 128 bytes = 32640 bytes */
 
-#ifdef BOARD_HAS_EXTRA_SYS_PROPS
-/* This is for boards that have an excessive number of system props set. */
-
-#define PA_COUNT_MAX  494
-#define PA_INFO_START 2048
-#define PA_SIZE       65536
-
-#else
-
 #define PA_COUNT_MAX  247
 #define PA_INFO_START 1024
 #define PA_SIZE       32768
-
-#endif
 
 static workspace pa_workspace;
 static prop_info *pa_info_array;
@@ -202,7 +164,7 @@ static int init_property_area(void)
 
         /* plug into the lib property services */
     __system_property_area__ = pa;
-    property_area_inited = 1;
+
     return 0;
 }
 
@@ -229,7 +191,7 @@ static int property_write(prop_info *pi, const char *value)
  *
  * Returns 1 if uid allowed, 0 otherwise.
  */
-static int check_control_perms(const char *name, unsigned int uid, unsigned int gid) {
+static int check_control_perms(const char *name, int uid, int gid) {
     int i;
     if (uid == AID_SYSTEM || uid == AID_ROOT)
         return 1;
@@ -250,7 +212,7 @@ static int check_control_perms(const char *name, unsigned int uid, unsigned int 
  * Checks permissions for setting system properties.
  * Returns 1 if uid allowed, 0 otherwise.
  */
-static int check_perms(const char *name, unsigned int uid, unsigned int gid)
+static int check_perms(const char *name, unsigned int uid, int gid)
 {
     int i;
     if (uid == 0)
@@ -386,7 +348,7 @@ static int property_list(void (*propfn)(const char *key, const char *value, void
     return 0;
 }
 
-void handle_property_set_fd()
+void handle_property_set_fd(int fd)
 {
     prop_msg msg;
     int s;
@@ -397,7 +359,7 @@ void handle_property_set_fd()
     socklen_t addr_size = sizeof(addr);
     socklen_t cr_size = sizeof(cr);
 
-    if ((s = accept(property_set_fd, (struct sockaddr *) &addr, &addr_size)) < 0) {
+    if ((s = accept(fd, (struct sockaddr *) &addr, &addr_size)) < 0) {
         return;
     }
 
@@ -409,15 +371,21 @@ void handle_property_set_fd()
     }
 
     r = recv(s, &msg, sizeof(msg), 0);
-    close(s);
+    if(msg.cmd != PROP_MSG_SETPROP_SYNC) {
+        close(s);
+    }
     if(r != sizeof(prop_msg)) {
         ERROR("sys_prop: mis-match msg size recieved: %d expected: %d\n",
               r, sizeof(prop_msg));
+        if(msg.cmd == PROP_MSG_SETPROP_SYNC) {
+            close(s);
+        }
         return;
     }
 
     switch(msg.cmd) {
     case PROP_MSG_SETPROP:
+    case PROP_MSG_SETPROP_SYNC:
         msg.name[PROP_NAME_MAX-1] = 0;
         msg.value[PROP_VALUE_MAX-1] = 0;
 
@@ -440,6 +408,11 @@ void handle_property_set_fd()
 
     default:
         break;
+    }
+
+    //close socket until we've fnished setting property
+    if(msg.cmd == PROP_MSG_SETPROP_SYNC) {
+        close(s);
     }
 }
 
@@ -535,15 +508,15 @@ void property_init(void)
     load_properties_from_file(PROP_PATH_RAMDISK_DEFAULT);
 }
 
-int properties_inited(void)
-{
-    return property_area_inited;
-}
-
-void start_property_service(void)
+int start_property_service(char* hardware)
 {
     int fd;
-
+    
+    if (sizeof(hardware) > 0) {
+        char props[64];
+        snprintf(props, sizeof(props), "/system/build.%s.prop", hardware);
+        load_properties_from_file(props);
+    }
     load_properties_from_file(PROP_PATH_SYSTEM_BUILD);
     load_properties_from_file(PROP_PATH_SYSTEM_DEFAULT);
     load_properties_from_file(PROP_PATH_LOCAL_OVERRIDE);
@@ -551,15 +524,10 @@ void start_property_service(void)
     load_persistent_properties();
 
     fd = create_socket(PROP_SERVICE_NAME, SOCK_STREAM, 0666, 0, 0);
-    if(fd < 0) return;
+    if(fd < 0) return -1;
     fcntl(fd, F_SETFD, FD_CLOEXEC);
     fcntl(fd, F_SETFL, O_NONBLOCK);
 
     listen(fd, 8);
-    property_set_fd = fd;
-}
-
-int get_property_set_fd()
-{
-    return property_set_fd;
+    return fd;
 }

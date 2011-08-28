@@ -2,17 +2,6 @@ LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
 #
-# ARMv6 specific objects
-#
-
-ifeq ($(TARGET_ARCH),arm)
-LOCAL_ASFLAGS := -march=armv6
-LOCAL_SRC_FILES := rotate90CW_4x4_16v6.S
-LOCAL_MODULE := libpixelflinger_armv6
-include $(BUILD_STATIC_LIBRARY)
-endif
-
-#
 # C/C++ and ARMv5 objects
 #
 
@@ -40,19 +29,25 @@ PIXELFLINGER_SRC_FILES:= \
 	buffer.cpp
 
 ifeq ($(TARGET_ARCH),arm)
-ifeq ($(TARGET_ARCH_VARIANT),armv7-a-neon)
-PIXELFLINGER_SRC_FILES += t32cb16_neon.S
-PIXELFLINGER_SRC_FILES += t32cb16blend.S
+ifeq ($(ARCH_ARM_HAVE_NEON),true)
+PIXELFLINGER_SRC_FILES += t32cb16_neon.c.arm
 PIXELFLINGER_SRC_FILES += col32cb16blend_neon.S
+PIXELFLINGER_SRC_FILES += t32cb16blend_neon.S
 else
-PIXELFLINGER_SRC_FILES += t32cb16blend.S
 PIXELFLINGER_SRC_FILES += col32cb16blend.S
+PIXELFLINGER_SRC_FILES += t32cb16blend.S
 endif
 endif
 
 ifeq ($(TARGET_ARCH),arm)
 # special optimization flags for pixelflinger
 PIXELFLINGER_CFLAGS += -fstrict-aliasing -fomit-frame-pointer
+endif
+
+ifeq ($(TARGET_ARCH),arm)
+ifeq ($(ARCH_ARM_HAVE_NEON),true)
+        PIXELFLINGER_CFLAGS += -D__ARM_HAVE_NEON
+endif
 endif
 
 LOCAL_SHARED_LIBRARIES := libcutils
@@ -78,10 +73,6 @@ ifneq ($(BUILD_TINY_ANDROID),true)
 LOCAL_SHARED_LIBRARIES += libhardware_legacy
 LOCAL_CFLAGS += -DWITH_LIB_HARDWARE
 endif
-
-ifeq ($(TARGET_ARCH),arm)
-LOCAL_WHOLE_STATIC_LIBRARIES := libpixelflinger_armv6
-endif
 include $(BUILD_SHARED_LIBRARY)
 
 #
@@ -92,9 +83,6 @@ include $(CLEAR_VARS)
 LOCAL_MODULE:= libpixelflinger_static
 LOCAL_SRC_FILES := $(PIXELFLINGER_SRC_FILES)
 LOCAL_CFLAGS := $(PIXELFLINGER_CFLAGS) 
-ifeq ($(TARGET_ARCH),arm)
-LOCAL_WHOLE_STATIC_LIBRARIES := libpixelflinger_armv6
-endif
 include $(BUILD_STATIC_LIBRARY)
 
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,36 +32,33 @@
 #include <private/android_filesystem_config.h>
 #include <sys/time.h>
 #include <asm/page.h>
-#include <sys/wait.h>
 
+#include "init.h"
 #include "devices.h"
-#include "util.h"
-#include "log.h"
-#include "list.h"
 
+#define CMDLINE_PREFIX  "/dev"
 #define SYSFS_PREFIX    "/sys"
-#define FIRMWARE_DIR1   "/etc/firmware"
-#define FIRMWARE_DIR2   "/vendor/firmware"
-
-static int device_fd = -1;
+#define FIRMWARE_DIR    "/etc/firmware"
+#define MAX_QEMU_PERM 6
 
 struct uevent {
     const char *action;
     const char *path;
     const char *subsystem;
     const char *firmware;
-    const char *partition_name;
-    int partition_num;
     int major;
     int minor;
 };
 
-static int open_uevent_socket(void)
+int open_uevent_socket(void)
 {
     struct sockaddr_nl addr;
     int sz = 64*1024; // XXX larger? udev uses 16MB!
     int on = 1;
-    int s;
+    static int s = -1;
+
+    if (s >= 0)
+        return s;
 
     memset(&addr, 0, sizeof(addr));
     addr.nl_family = AF_NETLINK;
@@ -84,122 +82,279 @@ static int open_uevent_socket(void)
 
 struct perms_ {
     char *name;
-    char *attr;
     mode_t perm;
     unsigned int uid;
     unsigned int gid;
     unsigned short prefix;
 };
+static struct perms_ devperms[] = {
+    { "/dev/null",          0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/zero",          0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/full",          0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/ptmx",          0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/tty",           0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/random",        0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/urandom",       0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/ashmem",        0666,   AID_ROOT,       AID_ROOT,       0 },
+    { "/dev/binder",        0666,   AID_ROOT,       AID_ROOT,       0 },
 
+	    /* logger should be world writable (for logging) but not readable */
+    { "/dev/log/",          0662,   AID_ROOT,       AID_LOG,        1 },
+
+    /* the msm hw3d client device node is world writable/readable. */
+    { "/dev/msm_hw3dc",     0666,   AID_ROOT,       AID_ROOT,       0 },
+
+    /* gpu driver for adreno200 is globally accessible */
+    { "/dev/kgsl",          0666,   AID_ROOT,       AID_ROOT,       0 },
+
+        /* these should not be world writable */
+    { "/dev/diag",          0660,   AID_RADIO,      AID_RADIO,        0 },
+    { "/dev/diag_arm9",     0660,   AID_RADIO,      AID_RADIO,        0 },
+    { "/dev/android_adb",   0660,   AID_ADB,        AID_ADB,        0 },
+    { "/dev/android_adb_enable",   0660,   AID_ADB,        AID_ADB,        0 },
+    { "/dev/ttyMSM0",       0600,   AID_BLUETOOTH,  AID_BLUETOOTH,  0 },
+    { "/dev/ttyHS0",        0600,   AID_BLUETOOTH,  AID_BLUETOOTH,  0 },
+    { "/dev/uinput",        0660,   AID_SYSTEM,     AID_BLUETOOTH,  0 },
+    { "/dev/alarm",         0664,   AID_SYSTEM,     AID_RADIO,      0 },
+    { "/dev/tty0",          0660,   AID_ROOT,       AID_SYSTEM,     0 },
+    { "/dev/graphics/",     0660,   AID_ROOT,       AID_GRAPHICS,   1 },
+    { "/dev/msm_hw3dm",     0660,   AID_SYSTEM,     AID_GRAPHICS,   0 },
+    { "/dev/msm_rotator",   0660,   AID_SYSTEM,     AID_GRAPHICS,   0 },
+    { "/dev/input/",        0660,   AID_ROOT,       AID_INPUT,      1 },
+    { "/dev/eac",           0660,   AID_ROOT,       AID_AUDIO,      0 },
+    { "/dev/cam",           0660,   AID_ROOT,       AID_CAMERA,     0 },
+    { "/dev/pmem",          0660,   AID_SYSTEM,     AID_GRAPHICS,   0 },
+    { "/dev/pmem_adsp",     0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/pmem_camera",   0660,   AID_SYSTEM,     AID_CAMERA,     1 },
+    { "/dev/pmem_smipool",  0660,   AID_SYSTEM,     AID_CAMERA,     1 },
+    { "/dev/pmem_venc",     0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/oncrpc/",       0660,   AID_RADIO,       AID_SYSTEM,     1 },
+    { "/dev/adsp/",         0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/snd/",          0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/mt9t013",       0660,   AID_SYSTEM,     AID_SYSTEM,     0 },
+#ifndef NO_MSM_CAMDIR
+    { "/dev/msm_camera/",   0660,   AID_SYSTEM,     AID_SYSTEM,     1 },
+#else
+    { "/dev/msm_camera",    0660,   AID_SYSTEM,     AID_SYSTEM,     0 },
+#endif
+    { "/dev/akm8976_daemon",0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/akm8976_aot",   0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/akm8975_daemon",0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/akm8975_aot",   0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/akm8973_daemon",0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/akm8973_aot",   0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/bma150",        0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/bma020",        0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/cm3602",        0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/akm8976_pffd",  0640,   AID_COMPASS,    AID_SYSTEM,     0 },
+    { "/dev/lightsensor",   0640,   AID_SYSTEM,     AID_SYSTEM,     0 },
+#ifdef AUDIOV2
+    { "/dev/msm_pcm_dec",   0666,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/snd/controlC0", 0666,   AID_SYSTEM,     AID_AUDIO,      1 },
+#endif
+
+    { "/dev/msm_pcm_out",   0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/msm_pcm_in",    0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/msm_pcm_ctl",   0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/msm_snd",       0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/msm_mp3",       0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/audience_a1026",0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/codec_aic3254", 0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/tpa2018d1",     0660,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/msm_audpre",    0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_audio_ctl", 0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_audio_dev_ctrl", 0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_acdb",       0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_aac",       0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_amrnb",     0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_amrnb_in",  0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_amrwb",     0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_evrc",      0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_mp3_lp",    0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_pcm_dec",   0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_pcm_lp_dec",0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_preproc_ctl",0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_qcelp",     0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_voicememo", 0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_wma",       0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/msm_wmapro",    0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/htc-acoustic",  0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/htc-acdb",      0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/vdec",          0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/q6venc",        0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/snd/dsp",       0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/snd/dsp1",      0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/snd/mixer",     0660,   AID_SYSTEM,     AID_AUDIO,      0 },
+    { "/dev/smd0",          0640,   AID_RADIO,      AID_RADIO,      0 },
+    { "/dev/qemu_trace",    0666,   AID_SYSTEM,     AID_SYSTEM,     0 },
+    { "/dev/qmi",           0640,   AID_RADIO,      AID_RADIO,      0 },
+    { "/dev/qmi0",          0640,   AID_RADIO,      AID_RADIO,      0 },
+    { "/dev/qmi1",          0640,   AID_RADIO,      AID_RADIO,      0 },
+    { "/dev/qmi2",          0640,   AID_RADIO,      AID_RADIO,      0 },
+        /* CDMA radio interface MUX */
+    { "/dev/ts0710mux",     0640,   AID_RADIO,      AID_RADIO,      1 },
+    { "/dev/ppp",           0660,   AID_RADIO,      AID_VPN,        0 },
+    { "/dev/tun",           0640,   AID_VPN,        AID_VPN,        0 },
+    { "/dev/bus/usb/",      0660,   AID_ROOT,       AID_USB,        1 },
+    { "/dev/system_bus_freq", 0660, AID_SYSTEM,       AID_SYSTEM,       0 },
+    { "/dev/cpu_dma_latency", 0660, AID_SYSTEM,       AID_SYSTEM,       0 },
+    { "/dev/msm_vidc_reg", 0660, AID_SYSTEM,       AID_AUDIO,       1 },
+    { "/dev/msm_vidc_dec", 0660, AID_SYSTEM,       AID_AUDIO,       1 },
+    { "/dev/msm_vidc_enc", 0660, AID_SYSTEM,       AID_AUDIO,       1 },
+    { "/dev/gemini0",   0660,   AID_SYSTEM,     AID_SYSTEM,     1 },
+    { "/dev/smdcntl0",          0640,   AID_RADIO,      AID_RADIO,      0 },
+    { "/dev/smdcntl1",          0640,   AID_RADIO,      AID_RADIO,      0 },
+    { "/dev/smdcntl2",          0640,   AID_RADIO,      AID_RADIO,      0 },
+    { NULL, 0, 0, 0, 0 },
+};
+
+/* devperms_partners list and perm_node are for hardware specific /dev entries */
 struct perm_node {
     struct perms_ dp;
     struct listnode plist;
 };
+list_declare(devperms_partners);
 
-static list_declare(sys_perms);
-static list_declare(dev_perms);
+/*
+ * Permission override when in emulator mode, must be parsed before
+ * system properties is initalized.
+ */
+static int qemu_perm_count;
+static struct perms_ qemu_perms[MAX_QEMU_PERM + 1];
 
-int add_dev_perms(const char *name, const char *attr,
-                  mode_t perm, unsigned int uid, unsigned int gid,
-                  unsigned short prefix) {
-    struct perm_node *node = calloc(1, sizeof(*node));
+int add_devperms_partners(const char *name, mode_t perm, unsigned int uid,
+                        unsigned int gid, unsigned short prefix) {
+    int size;
+    struct perm_node *node = malloc(sizeof (struct perm_node));
     if (!node)
         return -ENOMEM;
 
-    node->dp.name = strdup(name);
-    if (!node->dp.name)
+    size = strlen(name) + 1;
+    if ((node->dp.name = malloc(size)) == NULL)
         return -ENOMEM;
 
-    if (attr) {
-        node->dp.attr = strdup(attr);
-        if (!node->dp.attr)
-            return -ENOMEM;
-    }
-
+    memcpy(node->dp.name, name, size);
     node->dp.perm = perm;
     node->dp.uid = uid;
     node->dp.gid = gid;
     node->dp.prefix = prefix;
 
-    if (attr)
-        list_add_tail(&sys_perms, &node->plist);
-    else
-        list_add_tail(&dev_perms, &node->plist);
-
+    list_add_tail(&devperms_partners, &node->plist);
     return 0;
 }
 
-void fixup_sys_perms(const char *upath)
+void qemu_init(void) {
+    qemu_perm_count = 0;
+    memset(&qemu_perms, 0, sizeof(qemu_perms));
+}
+
+static int qemu_perm(const char* name, mode_t perm, unsigned int uid,
+                         unsigned int gid, unsigned short prefix)
 {
-    char buf[512];
-    struct listnode *node;
-    struct perms_ *dp;
+    char *buf;
+    if (qemu_perm_count == MAX_QEMU_PERM)
+        return -ENOSPC;
 
-        /* upaths omit the "/sys" that paths in this list
-         * contain, so we add 4 when comparing...
-         */
-    list_for_each(node, &sys_perms) {
-        dp = &(node_to_item(node, struct perm_node, plist))->dp;
-        if (dp->prefix) {
-            if (strncmp(upath, dp->name + 4, strlen(dp->name + 4)))
-                continue;
-        } else {
-            if (strcmp(upath, dp->name + 4))
-                continue;
-        }
+    buf = malloc(strlen(name) + 1);
+    if (!buf)
+        return -errno;
 
-        if ((strlen(upath) + strlen(dp->attr) + 6) > sizeof(buf))
+    strlcpy(buf, name, strlen(name) + 1);
+    qemu_perms[qemu_perm_count].name = buf;
+    qemu_perms[qemu_perm_count].perm = perm;
+    qemu_perms[qemu_perm_count].uid = uid;
+    qemu_perms[qemu_perm_count].gid = gid;
+    qemu_perms[qemu_perm_count].prefix = prefix;
+
+    qemu_perm_count++;
+    return 0;
+}
+
+/* Permission overrides for emulator that are parsed from /proc/cmdline. */
+void qemu_cmdline(const char* name, const char *value)
+{
+    char *buf;
+    if (!strcmp(name, "android.ril")) {
+        /* cmd line params currently assume /dev/ prefix */
+        if (asprintf(&buf, CMDLINE_PREFIX"/%s", value) == -1) {
             return;
-
-        sprintf(buf,"/sys%s/%s", upath, dp->attr);
-        INFO("fixup %s %d %d 0%o\n", buf, dp->uid, dp->gid, dp->perm);
-        chown(buf, dp->uid, dp->gid);
-        chmod(buf, dp->perm);
+        }
+        INFO("nani- buf:: %s\n", buf);
+        qemu_perm(buf, 0660, AID_RADIO, AID_ROOT, 0);
     }
 }
 
+static int get_device_perm_inner(struct perms_ *perms, const char *path,
+                                    unsigned *uid, unsigned *gid, mode_t *perm)
+{
+    int i;
+    for(i = 0; perms[i].name; i++) {
+
+        if(perms[i].prefix) {
+            if(strncmp(path, perms[i].name, strlen(perms[i].name)))
+                continue;
+        } else {
+            if(strcmp(path, perms[i].name))
+                continue;
+        }
+        *uid = perms[i].uid;
+        *gid = perms[i].gid;
+        *perm = perms[i].perm;
+        return 0;
+    }
+    return -1;
+}
+
+/* First checks for emulator specific permissions specified in /proc/cmdline. */
 static mode_t get_device_perm(const char *path, unsigned *uid, unsigned *gid)
 {
     mode_t perm;
-    struct listnode *node;
-    struct perm_node *perm_node;
-    struct perms_ *dp;
 
-    /* search the perms list in reverse so that ueventd.$hardware can
-     * override ueventd.rc
-     */
-    list_for_each_reverse(node, &dev_perms) {
-        perm_node = node_to_item(node, struct perm_node, plist);
-        dp = &perm_node->dp;
+    if (get_device_perm_inner(qemu_perms, path, uid, gid, &perm) == 0) {
+        return perm;
+    } else if (get_device_perm_inner(devperms, path, uid, gid, &perm) == 0) {
+        return perm;
+    } else {
+        struct listnode *node;
+        struct perm_node *perm_node;
+        struct perms_ *dp;
 
-        if (dp->prefix) {
-            if (strncmp(path, dp->name, strlen(dp->name)))
-                continue;
-        } else {
-            if (strcmp(path, dp->name))
-                continue;
+        /* Check partners list. */
+        list_for_each(node, &devperms_partners) {
+            perm_node = node_to_item(node, struct perm_node, plist);
+            dp = &perm_node->dp;
+
+            if (dp->prefix) {
+                if (strncmp(path, dp->name, strlen(dp->name)))
+                    continue;
+            } else {
+                if (strcmp(path, dp->name))
+                    continue;
+            }
+            /* Found perm in partner list. */
+            *uid = dp->uid;
+            *gid = dp->gid;
+            return dp->perm;
         }
-        *uid = dp->uid;
-        *gid = dp->gid;
-        return dp->perm;
+        /* Default if nothing found. */
+        *uid = 0;
+        *gid = 0;
+        return 0600;
     }
-    /* Default if nothing found. */
-    *uid = 0;
-    *gid = 0;
-    return 0600;
 }
 
-static void make_device(const char *path,
-                        const char *upath,
-                        int block, int major, int minor)
+static void make_device(const char *path, int block, int major, int minor)
 {
     unsigned uid;
     unsigned gid;
     mode_t mode;
     dev_t dev;
 
+    if(major > 255 || minor > 255)
+        return;
+
     mode = get_device_perm(path, &uid, &gid) | (block ? S_IFBLK : S_IFCHR);
-    dev = makedev(major, minor);
+    dev = (major << 8) | minor;
     /* Temporarily change egid to avoid race condition setting the gid of the
      * device node. Unforunately changing the euid would prevent creation of
      * some device nodes, so the uid has to be set with chown() and is still
@@ -237,8 +392,6 @@ static void parse_event(const char *msg, struct uevent *uevent)
     uevent->firmware = "";
     uevent->major = -1;
     uevent->minor = -1;
-    uevent->partition_name = NULL;
-    uevent->partition_num = -1;
 
         /* currently ignoring SEQNUM */
     while(*msg) {
@@ -260,12 +413,6 @@ static void parse_event(const char *msg, struct uevent *uevent)
         } else if(!strncmp(msg, "MINOR=", 6)) {
             msg += 6;
             uevent->minor = atoi(msg);
-        } else if(!strncmp(msg, "PARTN=", 6)) {
-            msg += 6;
-            uevent->partition_num = atoi(msg);
-        } else if(!strncmp(msg, "PARTNAME=", 9)) {
-            msg += 9;
-            uevent->partition_name = msg;
         }
 
             /* advance to after the next \0 */
@@ -278,82 +425,14 @@ static void parse_event(const char *msg, struct uevent *uevent)
                     uevent->firmware, uevent->major, uevent->minor);
 }
 
-static char **parse_platform_block_device(struct uevent *uevent)
-{
-    const char *driver;
-    const char *path;
-    char *slash;
-    int width;
-    char buf[256];
-    char link_path[256];
-    int fd;
-    int link_num = 0;
-    int ret;
-    char *p;
-    unsigned int size;
-    struct stat info;
-
-    char **links = malloc(sizeof(char *) * 4);
-    if (!links)
-        return NULL;
-    memset(links, 0, sizeof(char *) * 4);
-
-    /* Drop "/devices/platform/" */
-    path = uevent->path;
-    driver = path + 18;
-    slash = strchr(driver, '/');
-    if (!slash)
-        goto err;
-    width = slash - driver;
-    if (width <= 0)
-        goto err;
-
-    snprintf(link_path, sizeof(link_path), "/dev/block/platform/%.*s",
-             width, driver);
-
-    if (uevent->partition_name) {
-        p = strdup(uevent->partition_name);
-        sanitize(p);
-        if (asprintf(&links[link_num], "%s/by-name/%s", link_path, p) > 0)
-            link_num++;
-        else
-            links[link_num] = NULL;
-        free(p);
-    }
-
-    if (uevent->partition_num >= 0) {
-        if (asprintf(&links[link_num], "%s/by-num/p%d", link_path, uevent->partition_num) > 0)
-            link_num++;
-        else
-            links[link_num] = NULL;
-    }
-
-    slash = strrchr(path, '/');
-    if (asprintf(&links[link_num], "%s/%s", link_path, slash + 1) > 0)
-        link_num++;
-    else
-        links[link_num] = NULL;
-
-    return links;
-
-err:
-    free(links);
-    return NULL;
-}
-
 static void handle_device_event(struct uevent *uevent)
 {
     char devpath[96];
     int devpath_ready = 0;
     char *base, *name;
-    char **links = NULL;
     int block;
-    int i;
 
-    if (!strcmp(uevent->action,"add"))
-        fixup_sys_perms(uevent->path);
-
-        /* if it's not a /dev device, nothing else to do */
+        /* if it's not a /dev device, nothing to do */
     if((uevent->major < 0) || (uevent->minor < 0))
         return;
 
@@ -372,8 +451,6 @@ static void handle_device_event(struct uevent *uevent)
         block = 1;
         base = "/dev/block/";
         mkdir(base, 0755);
-        if (!strncmp(uevent->path, "/devices/platform/", 18))
-            links = parse_platform_block_device(uevent);
     } else {
         block = 0;
             /* this should probably be configurable somehow */
@@ -432,25 +509,13 @@ static void handle_device_event(struct uevent *uevent)
         snprintf(devpath, sizeof(devpath), "%s%s", base, name);
 
     if(!strcmp(uevent->action, "add")) {
-        make_device(devpath, uevent->path, block, uevent->major, uevent->minor);
-        if (links) {
-            for (i = 0; links[i]; i++)
-                make_link(devpath, links[i]);
-        }
+        make_device(devpath, block, uevent->major, uevent->minor);
+        return;
     }
 
     if(!strcmp(uevent->action, "remove")) {
-        if (links) {
-            for (i = 0; links[i]; i++)
-                remove_link(devpath, links[i]);
-        }
         unlink(devpath);
-    }
-
-    if (links) {
-        for (i = 0; links[i]; i++)
-            free(links[i]);
-        free(links);
+        return;
     }
 }
 
@@ -463,8 +528,6 @@ static int load_firmware(int fw_fd, int loading_fd, int data_fd)
     if(fstat(fw_fd, &st) < 0)
         return -1;
     len_to_copy = st.st_size;
-
-    write(loading_fd, "1", 1);  /* start transfer */
 
     while (len_to_copy > 0) {
         char buf[PAGE_SIZE];
@@ -492,17 +555,12 @@ static int load_firmware(int fw_fd, int loading_fd, int data_fd)
     }
 
 out:
-    if(!ret)
-        write(loading_fd, "0", 1);  /* successful end of transfer */
-    else
-        write(loading_fd, "-1", 2); /* abort transfer */
-
     return ret;
 }
 
 static void process_firmware_event(struct uevent *uevent)
 {
-    char *root, *loading, *data, *file1 = NULL, *file2 = NULL;
+    char *root, *loading, *data, *file;
     int l, loading_fd, data_fd, fw_fd;
 
     log_event_print("firmware event { '%s', '%s' }\n",
@@ -520,11 +578,7 @@ static void process_firmware_event(struct uevent *uevent)
     if (l == -1)
         goto loading_free_out;
 
-    l = asprintf(&file1, FIRMWARE_DIR1"/%s", uevent->firmware);
-    if (l == -1)
-        goto data_free_out;
-
-    l = asprintf(&file2, FIRMWARE_DIR2"/%s", uevent->firmware);
+    l = asprintf(&file, FIRMWARE_DIR"/%s", uevent->firmware);
     if (l == -1)
         goto data_free_out;
 
@@ -532,21 +586,27 @@ static void process_firmware_event(struct uevent *uevent)
     if(loading_fd < 0)
         goto file_free_out;
 
-    data_fd = open(data, O_WRONLY);
-    if(data_fd < 0)
-        goto loading_close_out;
+    write(loading_fd, "1", 1);  /* start transfer */
 
-    fw_fd = open(file1, O_RDONLY);
-    if(fw_fd < 0) {
-        fw_fd = open(file2, O_RDONLY);
-        if(fw_fd < 0)
-            goto data_close_out;
+    data_fd = open(data, O_WRONLY);
+    if(data_fd < 0) {
+        write(loading_fd, "-1", 2); /* abort transfer */
+        goto loading_close_out;
     }
 
-    if(!load_firmware(fw_fd, loading_fd, data_fd))
-        log_event_print("firmware copy success { '%s', '%s' }\n", root, uevent->firmware);
-    else
-        log_event_print("firmware copy failure { '%s', '%s' }\n", root, uevent->firmware);
+    fw_fd = open(file, O_RDONLY);
+    if(fw_fd < 0) {
+        write(loading_fd, "-1", 2); /* abort transfer */
+        goto data_close_out;
+    }
+
+    if(!load_firmware(fw_fd, loading_fd, data_fd)) {
+        write(loading_fd, "0", 1);  /* successful end of transfer */
+        log_event_print("firmware copy success { '%s', '%s' }\n", root, file);
+    } else {
+        write(loading_fd, "-1", 2); /* abort transfer */
+        log_event_print("firmware copy failure { '%s', '%s' }\n", root, file);
+    }
 
     close(fw_fd);
 data_close_out:
@@ -554,8 +614,7 @@ data_close_out:
 loading_close_out:
     close(loading_fd);
 file_free_out:
-    free(file1);
-    free(file2);
+    free(file);
 data_free_out:
     free(data);
 loading_free_out:
@@ -567,8 +626,6 @@ root_free_out:
 static void handle_firmware_event(struct uevent *uevent)
 {
     pid_t pid;
-    int status;
-    int ret;
 
     if(strcmp(uevent->subsystem, "firmware"))
         return;
@@ -581,15 +638,11 @@ static void handle_firmware_event(struct uevent *uevent)
     if (!pid) {
         process_firmware_event(uevent);
         exit(EXIT_SUCCESS);
-    } else {
-        do {
-            ret = waitpid(pid, &status, 0);
-        } while (ret == -1 && errno == EINTR);
     }
 }
 
 #define UEVENT_MSG_LEN  1024
-void handle_device_fd()
+void handle_device_fd(int fd)
 {
     for(;;) {
         char msg[UEVENT_MSG_LEN+2];
@@ -598,7 +651,7 @@ void handle_device_fd()
         struct sockaddr_nl snl;
         struct msghdr hdr = {&snl, sizeof(snl), &iov, 1, cred_msg, sizeof(cred_msg), 0};
 
-        ssize_t n = recvmsg(device_fd, &hdr, 0);
+        ssize_t n = recvmsg(fd, &hdr, 0);
         if (n <= 0) {
             break;
         }
@@ -640,10 +693,10 @@ void handle_device_fd()
 **
 ** We drain any pending events from the netlink socket every time
 ** we poke another uevent file to make sure we don't overrun the
-** socket's buffer.  
+** socket's buffer.
 */
 
-static void do_coldboot(DIR *d)
+static void do_coldboot(int event_fd, DIR *d)
 {
     struct dirent *de;
     int dfd, fd;
@@ -654,7 +707,7 @@ static void do_coldboot(DIR *d)
     if(fd >= 0) {
         write(fd, "add\n", 4);
         close(fd);
-        handle_device_fd();
+        handle_device_fd(event_fd);
     }
 
     while((de = readdir(d))) {
@@ -671,49 +724,40 @@ static void do_coldboot(DIR *d)
         if(d2 == 0)
             close(fd);
         else {
-            do_coldboot(d2);
+            do_coldboot(event_fd, d2);
             closedir(d2);
         }
     }
 }
 
-static void coldboot(const char *path)
+static void coldboot(int event_fd, const char *path)
 {
     DIR *d = opendir(path);
     if(d) {
-        do_coldboot(d);
+        do_coldboot(event_fd, d);
         closedir(d);
     }
 }
 
-void device_init(void)
+int device_init(void)
 {
     suseconds_t t0, t1;
-    struct stat info;
     int fd;
 
-    device_fd = open_uevent_socket();
-    if(device_fd < 0)
-        return;
+    fd = open_uevent_socket();
+    if(fd < 0)
+        return -1;
 
-    fcntl(device_fd, F_SETFD, FD_CLOEXEC);
-    fcntl(device_fd, F_SETFL, O_NONBLOCK);
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+    fcntl(fd, F_SETFL, O_NONBLOCK);
 
-    if (stat(coldboot_done, &info) < 0) {
-        t0 = get_usecs();
-        coldboot("/sys/class");
-        coldboot("/sys/block");
-        coldboot("/sys/devices");
-        t1 = get_usecs();
-        fd = open(coldboot_done, O_WRONLY|O_CREAT, 0000);
-        close(fd);
-        log_event_print("coldboot %ld uS\n", ((long) (t1 - t0)));
-    } else {
-        log_event_print("skipping coldboot, already done\n");
-    }
-}
+    t0 = get_usecs();
+    coldboot(fd, "/sys/class");
+    coldboot(fd, "/sys/block");
+    coldboot(fd, "/sys/devices");
+    t1 = get_usecs();
 
-int get_device_fd()
-{
-    return device_fd;
+    log_event_print("coldboot %ld uS\n", ((long) (t1 - t0)));
+
+    return fd;
 }

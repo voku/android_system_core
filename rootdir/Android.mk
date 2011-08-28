@@ -7,7 +7,7 @@ copy_from := \
 	etc/dbus.conf \
 	etc/hosts
 
-ifeq ($(TARGET_PRODUCT),generic)
+ifeq ($(TARGET_PRODUCT),full)
 copy_from += etc/vold.fstab
 endif
 
@@ -37,14 +37,7 @@ file := $(TARGET_ROOT_OUT)/init.rc
 $(file) : $(LOCAL_PATH)/init.rc | $(ACP)
 	$(transform-prebuilt-to-target)
 ALL_PREBUILT += $(file)
-$(INSTALLED_RAMDISK_TARGET): $(file)
 endif
-
-file := $(TARGET_ROOT_OUT)/ueventd.rc
-$(file) : $(LOCAL_PATH)/ueventd.rc | $(ACP)
-	$(transform-prebuilt-to-target)
-ALL_PREBUILT += $(file)
-$(INSTALLED_RAMDISK_TARGET): $(file)
 
 # Just like /system/etc/init.goldfish.sh, the /init.godlfish.rc is here
 # to allow -user builds to properly run the dex pre-optimization pass in
@@ -53,13 +46,6 @@ file := $(TARGET_ROOT_OUT)/init.goldfish.rc
 $(file) : $(LOCAL_PATH)/etc/init.goldfish.rc | $(ACP)
 	$(transform-prebuilt-to-target)
 ALL_PREBUILT += $(file)
-$(INSTALLED_RAMDISK_TARGET): $(file)
-
-file := $(TARGET_ROOT_OUT)/ueventd.goldfish.rc
-$(file) : $(LOCAL_PATH)/etc/ueventd.goldfish.rc | $(ACP)
-	$(transform-prebuilt-to-target)
-ALL_PREBUILT += $(file)
-$(INSTALLED_RAMDISK_TARGET): $(file)
 
 # create some directories (some are mount points)
 DIRS := $(addprefix $(TARGET_ROOT_OUT)/, \

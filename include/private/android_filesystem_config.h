@@ -52,11 +52,7 @@
 #define AID_VPN           1016  /* vpn system */
 #define AID_KEYSTORE      1017  /* keystore subsystem */
 #define AID_USB           1018  /* USB devices */
-#define AID_GPS           1021  /* GPS daemon */
-#define AID_UNUSED1       1022  /* deprecated, DO NOT USE */
-#define AID_RFU1          1023  /* RFU */
-#define AID_RFU2          1024  /* RFU */
-#define AID_NFC           1025  /* nfc subsystem */
+#define AID_WIMAX         1030  /* wimax subsystem */
 
 #define AID_SHELL         2000  /* adb and debug shell user */
 #define AID_CACHE         2001  /* cache access */
@@ -70,11 +66,6 @@
 #define AID_NET_RAW       3004  /* can create raw INET sockets */
 #define AID_NET_ADMIN     3005  /* can configure interfaces and routing tables. */
 
-#define AID_MOT_ACCY      9000  /* motorola: accessory */
-#define AID_MOT_PWRIC     9001  /* motorola: power IC */
-#define AID_MOT_USB       9002  /* motorola: usb */
-#define AID_MOT_TCMD      9003  /* motorola: tcmd */
-
 #define AID_MISC          9998  /* access to misc storage */
 #define AID_NOBODY        9999
 
@@ -86,7 +77,7 @@ struct android_id_info {
     unsigned aid;
 };
 
-static const struct android_id_info android_ids[] = {
+static struct android_id_info android_ids[] = {
     { "root",      AID_ROOT, },
     { "system",    AID_SYSTEM, },
     { "radio",     AID_RADIO, },
@@ -103,7 +94,6 @@ static const struct android_id_info android_ids[] = {
     { "adb",       AID_ADB, },
     { "install",   AID_INSTALL, },
     { "media",     AID_MEDIA, },
-    { "nfc",       AID_NFC, },
     { "shell",     AID_SHELL, },
     { "cache",     AID_CACHE, },
     { "diag",      AID_DIAG, },
@@ -113,16 +103,12 @@ static const struct android_id_info android_ids[] = {
     { "vpn",       AID_VPN, },
     { "keystore",  AID_KEYSTORE, },
     { "usb",       AID_USB, },
-    { "gps",       AID_GPS, },
     { "inet",      AID_INET, },
     { "net_raw",   AID_NET_RAW, },
     { "net_admin", AID_NET_ADMIN, },
     { "misc",      AID_MISC, },
-    { "mot_accy",  AID_MOT_ACCY, },
-    { "mot_pwric", AID_MOT_PWRIC, },
-    { "mot_usb",   AID_MOT_USB, },
-    { "mot_tcmd",  AID_MOT_TCMD, },
     { "nobody",    AID_NOBODY, },
+    { "wimax",     AID_WIMAX, },
 };
 
 #define android_id_count \
@@ -154,7 +140,6 @@ static struct fs_path_config android_dirs[] = {
     { 00771, AID_SYSTEM, AID_SYSTEM, "data" },
     { 00750, AID_ROOT,   AID_SHELL,  "sbin" },
     { 00755, AID_ROOT,   AID_SHELL,  "system/bin" },
-    { 00755, AID_ROOT,   AID_SHELL,  "system/vendor" },
     { 00755, AID_ROOT,   AID_SHELL,  "system/xbin" },
     { 00755, AID_ROOT,   AID_ROOT,   "system/etc/ppp" },
     { 00777, AID_ROOT,   AID_ROOT,   "sdcard" },
@@ -183,6 +168,7 @@ static struct fs_path_config android_files[] = {
     { 00640, AID_SYSTEM,    AID_SYSTEM,    "system/etc/bluetooth/auto_pairing.conf" },
     { 00444, AID_RADIO,     AID_AUDIO,     "system/etc/AudioPara4.csv" },
     { 00555, AID_ROOT,      AID_ROOT,      "system/etc/ppp/*" },
+    { 00555, AID_ROOT,      AID_ROOT,      "system/etc/rc.*" },
     { 00644, AID_SYSTEM,    AID_SYSTEM,    "data/app/*" },
     { 00644, AID_SYSTEM,    AID_SYSTEM,    "data/app-private/*" },
     { 00644, AID_APP,       AID_APP,       "data/data/*" },
@@ -204,7 +190,6 @@ static struct fs_path_config android_files[] = {
     { 06755, AID_ROOT,      AID_ROOT,      "system/xbin/hcitool" },
     { 00755, AID_ROOT,      AID_SHELL,     "system/bin/*" },
     { 00755, AID_ROOT,      AID_SHELL,     "system/xbin/*" },
-    { 00755, AID_ROOT,      AID_SHELL,     "system/vendor/bin/*" },
     { 00750, AID_ROOT,      AID_SHELL,     "sbin/*" },
     { 00755, AID_ROOT,      AID_ROOT,      "bin/*" },
     { 00750, AID_ROOT,      AID_SHELL,     "init*" },

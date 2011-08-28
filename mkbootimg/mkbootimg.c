@@ -64,8 +64,8 @@ int usage(void)
             "       [ --cmdline <kernel-commandline> ]\n"
             "       [ --board <boardname> ]\n"
             "       [ --base <address> ]\n"
-            "       [ --pagesize <pagesize> ]\n"
             "       [ --ramdiskaddr <address> ]\n"
+            "       [ --pagesize <size-in-hexadecimal> ]\n"
             "       -o|--output <filename>\n"
             );
     return 1;
@@ -73,7 +73,7 @@ int usage(void)
 
 
 
-static unsigned char padding[4096] = { 0, };
+static unsigned char padding[8192] = { 0, };
 
 int write_padding(int fd, unsigned pagesize, unsigned itemsize)
 {
@@ -86,7 +86,7 @@ int write_padding(int fd, unsigned pagesize, unsigned itemsize)
 
     count = pagesize - (itemsize & pagemask);
 
-    if(write(fd, padding, count) != (signed)count) {
+    if(write(fd, padding, count) != count) {
         return -1;
     } else {
         return 0;
@@ -109,7 +109,7 @@ int main(int argc, char **argv)
     unsigned pagesize = 2048;
     int fd;
     SHA_CTX ctx;
-    const uint8_t* sha;
+    uint8_t* sha;
 
     argc--;
     argv++;
@@ -121,6 +121,8 @@ int main(int argc, char **argv)
     hdr.ramdisk_addr = 0x11000000;
     hdr.second_addr =  0x10F00000;
     hdr.tags_addr =    0x10000100;
+
+    hdr.page_size = pagesize;
 
     while(argc > 0){
         char *arg = argv[0];
@@ -148,20 +150,14 @@ int main(int argc, char **argv)
             hdr.tags_addr =    base + 0x00000100;
         } else if(!strcmp(arg, "--ramdiskaddr")) {
             hdr.ramdisk_addr = strtoul(val, 0, 16);
+        } else if (!strcmp(arg, "--pagesize")) {
+            pagesize = hdr.page_size = strtoul(val, 0, 16);
         } else if(!strcmp(arg, "--board")) {
             board = val;
-        } else if(!strcmp(arg,"--pagesize")) {
-            pagesize = strtoul(val, 0, 10);
-            if ((pagesize != 2048) && (pagesize != 4096)) {
-                fprintf(stderr,"error: unsupported page size %d\n", pagesize);
-                return -1;
-            }
         } else {
             return usage();
         }
     }
-    hdr.page_size = pagesize;
-
 
     if(bootimg == 0) {
         fprintf(stderr,"error: no output filename specified\n");
@@ -183,7 +179,7 @@ int main(int argc, char **argv)
         return usage();
     }
 
-    strcpy((char *)hdr.name, board);
+    strcpy(hdr.name, board);
 
     memcpy(hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
 
@@ -222,12 +218,12 @@ int main(int argc, char **argv)
      * differentiated based on their first 2k.
      */
     SHA_init(&ctx);
-    SHA_update(&ctx, kernel_data, (int)hdr.kernel_size);
-    SHA_update(&ctx, &hdr.kernel_size, (int)sizeof(hdr.kernel_size));
+    SHA_update(&ctx, kernel_data, hdr.kernel_size);
+    SHA_update(&ctx, &hdr.kernel_size, sizeof(hdr.kernel_size));
     SHA_update(&ctx, ramdisk_data, hdr.ramdisk_size);
-    SHA_update(&ctx, &hdr.ramdisk_size, (int)sizeof(hdr.ramdisk_size));
-    SHA_update(&ctx, second_data, (int)hdr.second_size);
-    SHA_update(&ctx, &hdr.second_size, (int)sizeof(hdr.second_size));
+    SHA_update(&ctx, &hdr.ramdisk_size, sizeof(hdr.ramdisk_size));
+    SHA_update(&ctx, second_data, hdr.second_size);
+    SHA_update(&ctx, &hdr.second_size, sizeof(hdr.second_size));
     sha = SHA_final(&ctx);
     memcpy(hdr.id, sha,
            SHA_DIGEST_SIZE > sizeof(hdr.id) ? sizeof(hdr.id) : SHA_DIGEST_SIZE);
@@ -241,14 +237,14 @@ int main(int argc, char **argv)
     if(write(fd, &hdr, sizeof(hdr)) != sizeof(hdr)) goto fail;
     if(write_padding(fd, pagesize, sizeof(hdr))) goto fail;
 
-    if(write(fd, kernel_data, hdr.kernel_size) != (signed)hdr.kernel_size) goto fail;
+    if(write(fd, kernel_data, hdr.kernel_size) != hdr.kernel_size) goto fail;
     if(write_padding(fd, pagesize, hdr.kernel_size)) goto fail;
 
-    if(write(fd, ramdisk_data, hdr.ramdisk_size) != (signed)hdr.ramdisk_size) goto fail;
+    if(write(fd, ramdisk_data, hdr.ramdisk_size) != hdr.ramdisk_size) goto fail;
     if(write_padding(fd, pagesize, hdr.ramdisk_size)) goto fail;
 
     if(second_data) {
-        if(write(fd, second_data, hdr.second_size) != (signed)hdr.second_size) goto fail;
+        if(write(fd, second_data, hdr.second_size) != hdr.second_size) goto fail;
         if(write_padding(fd, pagesize, hdr.ramdisk_size)) goto fail;
     }
 

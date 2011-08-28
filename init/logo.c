@@ -25,7 +25,7 @@
 #include <linux/fb.h>
 #include <linux/kd.h>
 
-#include "log.h"
+#include "init.h"
 
 #ifdef ANDROID
 #include <cutils/memory.h>

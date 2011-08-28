@@ -31,14 +31,12 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <linux/loop.h>
+#include <poll.h>
 
 #include "init.h"
 #include "keywords.h"
 #include "property_service.h"
 #include "devices.h"
-#include "init_parser.h"
-#include "util.h"
-#include "log.h"
 
 #include <private/android_filesystem_config.h>
 
@@ -255,7 +253,7 @@ int do_insmod(int nargs, char **args)
 
 int do_import(int nargs, char **args)
 {
-    return init_parse_config_file(args[1]);
+    return parse_config_file(args[1]);
 }
 
 int do_mkdir(int nargs, char **args)
@@ -312,7 +310,6 @@ int do_mount(int nargs, char **args)
     char *options = NULL;
     unsigned flags = 0;
     int n, i;
-    int wait = 0;
 
     for (n = 4; n < nargs; n++) {
         for (i = 0; mount_flags[i].name; i++) {
@@ -322,13 +319,9 @@ int do_mount(int nargs, char **args)
             }
         }
 
-        if (!mount_flags[i].name) {
-            if (!strcmp(args[n], "wait"))
-                wait = 1;
-            /* if our last argument isn't a flag, wolf it up as an option string */
-            else if (n + 1 == nargs)
-                options = args[n];
-        }
+        /* if our last argument isn't a flag, wolf it up as an option string */
+        if (n + 1 == nargs && !mount_flags[i].name)
+            options = args[n];
     }
 
     system = args[1];
@@ -343,8 +336,19 @@ int do_mount(int nargs, char **args)
 
         sprintf(tmp, "/dev/block/mtdblock%d", n);
 
-        if (wait)
-            wait_for_file(tmp, COMMAND_RETRY_TIMEOUT);
+        if (mount(tmp, target, system, flags, options) < 0) {
+            return -1;
+        }
+
+        return 0;
+    } else if (!strncmp(source, "emmc@", 5)) {
+        n = mmc_name_to_number(source + 5);
+        if (n < 0) {
+            return -1;
+        }
+
+        sprintf(tmp, "/dev/block/mmcblk%d", n);
+
         if (mount(tmp, target, system, flags, options) < 0) {
             return -1;
         }
@@ -391,8 +395,6 @@ int do_mount(int nargs, char **args)
         ERROR("out of loopback devices");
         return -1;
     } else {
-        if (wait)
-            wait_for_file(source, COMMAND_RETRY_TIMEOUT);
         if (mount(source, target, system, flags, options) < 0) {
             return -1;
         }
@@ -460,6 +462,7 @@ int do_restart(int nargs, char **args)
 int do_trigger(int nargs, char **args)
 {
     action_for_each_trigger(args[1], action_add_queue_tail);
+    drain_action_queue();
     return 0;
 }
 
@@ -592,15 +595,81 @@ int do_loglevel(int nargs, char **args) {
     return -1;
 }
 
-int do_wait(int nargs, char **args)
-{
-    if (nargs == 2) {
-        return wait_for_file(args[1], COMMAND_RETRY_TIMEOUT);
+int do_device(int nargs, char **args) {
+    int len;
+    char tmp[64];
+    char *source = args[1];
+    int prefix = 0;
+
+    if (nargs != 5)
+        return -1;
+    /* Check for wildcard '*' at the end which indicates a prefix. */
+    len = strlen(args[1]) - 1;
+    if (args[1][len] == '*') {
+        args[1][len] = '\0';
+        prefix = 1;
     }
-    return -1;
+    /* If path starts with mtd@ lookup the mount number. */
+    if (!strncmp(source, "mtd@", 4)) {
+        int n = mtd_name_to_number(source + 4);
+        if (n >= 0) {
+            snprintf(tmp, sizeof(tmp), "/dev/mtd/mtd%d", n);
+            source = tmp;
+        }
+    }
+    add_devperms_partners(source, get_mode(args[2]), decode_uid(args[3]),
+                          decode_uid(args[4]), prefix);
+    return 0;
+}
+
+int do_devwait(int nargs, char **args) {
+
+    int dev_fd, uevent_fd, rc, timeout = DEVWAIT_TIMEOUT;
+    struct pollfd ufds[1];
+
+    uevent_fd = open_uevent_socket();
+
+    ufds[0].fd = uevent_fd;
+    ufds[0].events = POLLIN;
+
+    for(;;) {
+
+        dev_fd = open(args[1], O_RDONLY);
+        if (dev_fd < 0) {
+            if (errno != ENOENT) {
+                ERROR("%s: open failed with error %d\n", __func__, errno);
+                rc = -errno;
+                break;
+            }
+        } else {
+            return 0;
+        }
+
+        ufds[0].revents = 0;
+
+        rc = poll(ufds, 1, DEVWAIT_POLL_TIME);
+
+        if (rc == 0) {
+            if (timeout > 0)
+                timeout -= DEVWAIT_POLL_TIME;
+            else {
+                ERROR("%s: timed out waiting on file: %s\n", __func__, args[1]);
+                rc = -ETIME;
+                break;
+            }
+            continue;
+        } else if (rc < 0) {
+            ERROR("%s: poll request failed for file: %s\n", __func__, args[1]);
+            break;
+        }
+
+        if (ufds[0].revents == POLLIN)
+            handle_device_fd(uevent_fd);
+    }
+
+    return rc;
 }
 
 int do_umount(int nargs, char **args) {
     return umount(args[1]);
 }
-

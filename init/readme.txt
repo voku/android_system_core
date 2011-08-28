@@ -72,7 +72,7 @@ setenv <name> <value>
 
 socket <name> <type> <perm> [ <user> [ <group> ] ]
    Create a unix domain socket named /dev/socket/<name> and pass
-   its fd to the launched process.  <type> must be "dgram", "stream" or "seqpacket".
+   its fd to the launched process.  <type> must be "dgram" or "stream".
    User and group default to 0.
 
 user <username>
@@ -124,6 +124,9 @@ service-exited-<name>
 
 Commands
 --------
+
+devwait <name>
+   Stall further initialization until device <name> is created.
 
 exec <path> [ <argument> ]*
    Fork and execute a program (<path>).  This will block until

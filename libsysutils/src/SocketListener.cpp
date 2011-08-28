@@ -198,7 +198,6 @@ void SocketListener::runListener() {
                         pthread_mutex_unlock(&mClientsLock);
                     }
                     FD_CLR(fd, &read_fds);
-                    pthread_mutex_lock(&mClientsLock);
                     continue;
                 }
             }

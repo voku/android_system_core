@@ -35,9 +35,6 @@
  *     ARM implementation, in this file above.
  *     We follow the fact that the initializer for mutex is a simple zero
  *     value.
- *
- * (3) These operations are NOT safe for SMP, as there is no currently
- *     no definition for a memory barrier operation.
  */
 
 #include <pthread.h>
@@ -49,35 +46,18 @@ static pthread_mutex_t  _swap_locks[SWAP_LOCK_COUNT];
    &_swap_locks[((unsigned)(void*)(addr) >> 3U) % SWAP_LOCK_COUNT]
 
 
-int32_t android_atomic_acquire_load(volatile const int32_t* addr)
-{
-    return *addr;
-}
-
-int32_t android_atomic_release_load(volatile const int32_t* addr)
-{
-    return *addr;
-}
-
-void android_atomic_acquire_store(int32_t value, volatile int32_t* addr) {
+void android_atomic_write(int32_t value, volatile int32_t* addr) {
     int32_t oldValue;
     do {
         oldValue = *addr;
-    } while (android_atomic_release_cas(oldValue, value, addr));
-}
-
-void android_atomic_release_store(int32_t value, volatile int32_t* addr) {
-    int32_t oldValue;
-    do {
-        oldValue = *addr;
-    } while (android_atomic_release_cas(oldValue, value, addr));
+    } while (android_atomic_cmpxchg(oldValue, value, addr));
 }
 
 int32_t android_atomic_inc(volatile int32_t* addr) {
     int32_t oldValue;
     do {
         oldValue = *addr;
-    } while (android_atomic_release_cas(oldValue, oldValue+1, addr));
+    } while (android_atomic_cmpxchg(oldValue, oldValue+1, addr));
     return oldValue;
 }
 
@@ -85,7 +65,7 @@ int32_t android_atomic_dec(volatile int32_t* addr) {
     int32_t oldValue;
     do {
         oldValue = *addr;
-    } while (android_atomic_release_cas(oldValue, oldValue-1, addr));
+    } while (android_atomic_cmpxchg(oldValue, oldValue-1, addr));
     return oldValue;
 }
 
@@ -93,7 +73,7 @@ int32_t android_atomic_add(int32_t value, volatile int32_t* addr) {
     int32_t oldValue;
     do {
         oldValue = *addr;
-    } while (android_atomic_release_cas(oldValue, oldValue+value, addr));
+    } while (android_atomic_cmpxchg(oldValue, oldValue+value, addr));
     return oldValue;
 }
 
@@ -101,7 +81,7 @@ int32_t android_atomic_and(int32_t value, volatile int32_t* addr) {
     int32_t oldValue;
     do {
         oldValue = *addr;
-    } while (android_atomic_release_cas(oldValue, oldValue&value, addr));
+    } while (android_atomic_cmpxchg(oldValue, oldValue&value, addr));
     return oldValue;
 }
 
@@ -109,15 +89,11 @@ int32_t android_atomic_or(int32_t value, volatile int32_t* addr) {
     int32_t oldValue;
     do {
         oldValue = *addr;
-    } while (android_atomic_release_cas(oldValue, oldValue|value, addr));
+    } while (android_atomic_cmpxchg(oldValue, oldValue|value, addr));
     return oldValue;
 }
 
-int32_t android_atomic_acquire_swap(int32_t value, volatile int32_t* addr) {
-    return android_atomic_release_swap(value, addr);
-}
-
-int32_t android_atomic_release_swap(int32_t value, volatile int32_t* addr) {
+int32_t android_atomic_swap(int32_t value, volatile int32_t* addr) {
     int32_t oldValue;
     do {
         oldValue = *addr;
@@ -125,12 +101,7 @@ int32_t android_atomic_release_swap(int32_t value, volatile int32_t* addr) {
     return oldValue;
 }
 
-int android_atomic_acquire_cmpxchg(int32_t oldvalue, int32_t newvalue,
-                           volatile int32_t* addr) {
-    return android_atomic_release_cmpxchg(oldValue, newValue, addr);
-}
-
-int android_atomic_release_cmpxchg(int32_t oldvalue, int32_t newvalue,
+int android_atomic_cmpxchg(int32_t oldvalue, int32_t newvalue,
                            volatile int32_t* addr) {
     int result;
     pthread_mutex_t*  lock = SWAP_LOCK(addr);
@@ -147,3 +118,42 @@ int android_atomic_release_cmpxchg(int32_t oldvalue, int32_t newvalue,
     return result;
 }
 
+int64_t android_quasiatomic_swap_64(int64_t value, volatile int64_t* addr) {
+    int64_t oldValue;
+    pthread_mutex_t*  lock = SWAP_LOCK(addr);
+
+    pthread_mutex_lock(lock);
+
+    oldValue = *addr;
+    *addr    = value;
+
+    pthread_mutex_unlock(lock);
+    return oldValue;
+}
+
+int android_quasiatomic_cmpxchg_64(int64_t oldvalue, int64_t newvalue,
+        volatile int64_t* addr) {
+    int result;
+    pthread_mutex_t*  lock = SWAP_LOCK(addr);
+
+    pthread_mutex_lock(lock);
+
+    if (*addr == oldvalue) {
+        *addr  = newvalue;
+        result = 0;
+    } else {
+        result = 1;
+    }
+    pthread_mutex_unlock(lock);
+    return result;
+}
+
+int64_t android_quasiatomic_read_64(volatile int64_t* addr) {
+    int64_t result;
+    pthread_mutex_t*  lock = SWAP_LOCK(addr);
+
+    pthread_mutex_lock(lock);
+    result = *addr;
+    pthread_mutex_unlock(lock);
+    return result;
+}

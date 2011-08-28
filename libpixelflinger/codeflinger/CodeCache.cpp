@@ -19,8 +19,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <sys/mman.h>
 
 #include <cutils/log.h>
 #include <cutils/atomic.h>
@@ -41,14 +39,15 @@ namespace android {
 Assembly::Assembly(size_t size)
     : mCount(1), mSize(0)
 {
-    mBase = (uint32_t*)mspace_malloc(getMspace(), size);
-    mSize = size;
-    ensureMbaseExecutable();
+    mBase = (uint32_t*)malloc(size);
+    if (mBase) {
+        mSize = size;
+    }
 }
 
 Assembly::~Assembly()
 {
-    mspace_free(getMspace(), mBase);
+    free(mBase);
 }
 
 void Assembly::incStrong(const void*) const
@@ -76,30 +75,9 @@ uint32_t* Assembly::base() const
 
 ssize_t Assembly::resize(size_t newSize)
 {
-    mBase = (uint32_t*)mspace_realloc(getMspace(), mBase, newSize);
+    mBase = (uint32_t*)realloc(mBase, newSize);
     mSize = newSize;
-    ensureMbaseExecutable();
     return size();
-}
-
-mspace Assembly::getMspace()
-{
-    static mspace msp = create_contiguous_mspace(2 * 1024, 1024 * 1024, /*locked=*/ false);
-    return msp;
-}
-
-void Assembly::ensureMbaseExecutable()
-{
-    long pagesize = sysconf(_SC_PAGESIZE);
-    long pagemask = ~(pagesize - 1);  // assumes pagesize is a power of 2
-
-    uint32_t* pageStart = (uint32_t*) (((uintptr_t) mBase) & pagemask);
-    size_t adjustedLength = (mBase - pageStart) * sizeof(uint32_t) + mSize;
-
-    if (mBase && mprotect(pageStart, adjustedLength, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-        mspace_free(getMspace(), mBase);
-        mBase = NULL;
-    }
 }
 
 // ----------------------------------------------------------------------------

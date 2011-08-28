@@ -23,11 +23,10 @@
 
 #include <cutils/hashmap.h>
 
+#if defined(__i386__)
 #include <sys/mman.h>
-
-#if defined(MAP_ANON) && !defined(MAP_ANONYMOUS)
-#define MAP_ANONYMOUS MAP_ANON
 #endif
+
 
 #if defined(__arm__)
 #define DEFAULT_ARM_CODEGEN
@@ -231,7 +230,7 @@ class Compiler : public ErrorSink {
 
         void release() {
             if (pProgramBase != 0) {
-                munmap(pProgramBase, mSize);
+                free(pProgramBase);
                 pProgramBase = 0;
             }
         }
@@ -264,9 +263,7 @@ class Compiler : public ErrorSink {
         virtual void init(int size) {
             release();
             mSize = size;
-            pProgramBase = (char*) mmap(NULL, size, 
-                PROT_EXEC | PROT_READ | PROT_WRITE, 
-                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            pProgramBase = (char*) calloc(1, size);
             ind = pProgramBase;
         }
 
@@ -4611,7 +4608,7 @@ class Compiler : public ErrorSink {
 
     bool acceptStringLiteral() {
         if (tok == '"') {
-            pGen->leaR0((int) glo, mkpCharPtr, ET_RVALUE);
+            pGen->leaR0((long) glo, mkpCharPtr, ET_RVALUE);
             // This while loop merges multiple adjacent string constants.
             while (tok == '"') {
                 while (ch != '"' && ch != EOF) {
@@ -4691,13 +4688,13 @@ class Compiler : public ErrorSink {
                 // Align to 4-byte boundary
                 glo = (char*) (((intptr_t) glo + 3) & -4);
                 * (float*) glo = (float) ad;
-                pGen->loadFloat((int) glo, mkpFloat);
+                pGen->loadFloat((long) glo, mkpFloat);
                 glo += 4;
             } else if (t == TOK_NUM_DOUBLE) {
                 // Align to 8-byte boundary
                 glo = (char*) (((intptr_t) glo + 7) & -8);
                 * (double*) glo = ad;
-                pGen->loadFloat((int) glo, mkpDouble);
+                pGen->loadFloat((long) glo, mkpDouble);
                 glo += 8;
             } else if (c == 2) {
                 /* -, +, !, ~ */
@@ -4785,7 +4782,7 @@ class Compiler : public ErrorSink {
                     pGen->leaR0(n, pVal, et);
                 } else {
                     pVI->pForward = (void*) pGen->leaForward(
-                            (int) pVI->pForward, pVal);
+                            (long) pVI->pForward, pVal);
                 }
             }
         }
@@ -5904,7 +5901,7 @@ class Compiler : public ErrorSink {
                     mpCurrentSymbolStack = &mLocals;
                     if (name) {
                         /* patch forward references */
-                        pGen->resolveForward((int) name->pForward);
+                        pGen->resolveForward((long) name->pForward);
                         /* put function address */
                         name->pAddress = (void*) pCodeBuf->getPC();
                     }

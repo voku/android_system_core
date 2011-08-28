@@ -97,13 +97,19 @@ static Action *queue_action(unsigned op, const char *fmt, ...)
 {
     Action *a;
     va_list ap;
+    size_t cmdsize;
 
     a = calloc(1, sizeof(Action));
     if (a == 0) die("out of memory");
 
     va_start(ap, fmt);
-    vsprintf(a->cmd, fmt, ap);
+    cmdsize = vsnprintf(a->cmd, sizeof(a->cmd), fmt, ap);
     va_end(ap);
+
+    if (cmdsize >= sizeof(a->cmd)) {
+        free(a);
+        die("Command length (%d) exceeds maximum size (%d)", cmdsize, sizeof(a->cmd));
+    }
 
     if (action_last) {
         action_last->next = a;
@@ -285,8 +291,7 @@ void fb_execute_queue(usb_handle *usb)
         a->start = now();
         if (start < 0) start = a->start;
         if (a->msg) {
-            // fprintf(stderr,"%30s... ",a->msg);
-            fprintf(stderr,"%s...\n",a->msg);
+            fprintf(stderr,"%30s... ",a->msg);
         }
         if (a->op == OP_DOWNLOAD) {
             status = fb_download_data(usb, a->data, a->size);
