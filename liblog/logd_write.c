@@ -134,6 +134,7 @@ int __android_log_write(int prio, const char *tag, const char *msg)
 {
     struct iovec vec[3];
     log_id_t log_id = LOG_ID_MAIN;
+    char *temptag;
 
     if (!tag)
         tag = "";
@@ -158,6 +159,15 @@ int __android_log_write(int prio, const char *tag, const char *msg)
     vec[1].iov_len    = strlen(tag) + 1;
     vec[2].iov_base   = (void *) msg;
     vec[2].iov_len    = strlen(msg) + 1;
+
+    if(vec[1].iov_len + 1 >= LOGGER_ENTRY_MAX_PAYLOAD)
+    {
+         temptag=tag;
+         temptag[50]='\0';
+         vec[1].iov_len =51;
+    }
+    if(vec[1].iov_len + vec[2].iov_len + 1 > LOGGER_ENTRY_MAX_PAYLOAD)
+        vec[2].iov_len= LOGGER_ENTRY_MAX_PAYLOAD-vec[1].iov_len-1;
 
     return write_to_log(log_id, vec, 3);
 }
